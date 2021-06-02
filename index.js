@@ -250,6 +250,65 @@ function levelFromStatus(options) {
 }
 
 //
+// ### function requestLogger(options)
+// #### @options {Object} options to initialize the middleware.
+//
+
+
+exports.requestLogger = function requestLogger(options) {
+
+    ensureValidOptions(options);
+  
+    options.requestWhitelist = options.requestWhitelist || exports.requestWhitelist;
+    options.requestFilter = options.requestFilter || exports.defaultRequestFilter;
+    options.winstonInstance = options.winstonInstance || (winston.createLogger({
+        transports: options.transports,
+        format: options.format
+    }));
+    options.msg = options.msg || "HTTP {{req.method}} {{req.url}}";
+    options.baseMeta = options.baseMeta || {};
+    options.metaField = options.metaField === null || options.metaField === 'null' ? null : options.metaField || 'meta';
+    options.level = options.statusLevels ? levelFromStatus(options) : (options.level || 'info');
+  
+    // Using mustache style templating
+    var template = getTemplate(options, {
+        interpolate: /\{\{(.+?)\}\}/g
+    });
+  
+    return function (req, res, next) {
+  
+        // Let winston gather all the error data.
+        var meta = {};
+        meta.req = filterObject(req, options.requestWhitelist, options.requestFilter);
+  
+        if (options.metaField) {
+            var fields;
+            if (Array.isArray(options.metaField)) {
+                fields = options.metaField;
+            } else {
+                fields = options.metaField.split('.');
+            }
+            _(fields).reverse().forEach(field => {
+                var newMeta = {};
+                newMeta[field] = meta;
+                meta = newMeta;
+            });
+        }
+  
+        meta = _.assign(meta, options.baseMeta);
+  
+        var msg = template({ req: req, res: res });
+  
+        // This is fire and forget, we don't want logging to hold up the request so don't wait for the callback
+        if (!options.skip(req, res)) {
+            var level = _.isFunction(options.level) ? options.level(req, res) : options.level;
+            options.winstonInstance.log(_.merge(meta, { level, message: msg }));
+        }
+        next();
+    };
+  };
+
+//
 // ### function logger(options)
 // #### @options {Object} options to initialize the middleware.
 //
