@@ -261,6 +261,7 @@ exports.requestLogger = function requestLogger(options) {
   
     options.requestWhitelist = options.requestWhitelist || exports.requestWhitelist;
     options.requestFilter = options.requestFilter || exports.defaultRequestFilter;
+    options.headerBlacklist = options.headerBlacklist || exports.defaultHeaderBlacklist;
     options.winstonInstance = options.winstonInstance || (winston.createLogger({
         transports: options.transports,
         format: options.format
@@ -269,7 +270,8 @@ exports.requestLogger = function requestLogger(options) {
     options.baseMeta = options.baseMeta || {};
     options.metaField = options.metaField === null || options.metaField === 'null' ? null : options.metaField || 'meta';
     options.level = options.statusLevels ? levelFromStatus(options) : (options.level || 'info');
-  
+    options.skip = options.skip || exports.defaultSkip;
+
     // Using mustache style templating
     var template = getTemplate(options, {
         interpolate: /\{\{(.+?)\}\}/g
@@ -279,7 +281,7 @@ exports.requestLogger = function requestLogger(options) {
   
         // Let winston gather all the error data.
         var meta = {};
-        meta.req = filterObject(req, options.requestWhitelist, options.requestFilter);
+        meta.req = filterObject(req, options.requestWhitelist, options.headerBlacklist, options.requestFilter);
   
         if (options.metaField) {
             var fields;
