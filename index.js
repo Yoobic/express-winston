@@ -229,10 +229,12 @@ exports.errorLogger = function errorLogger(options) {
 
         if (!options.skip(req, res, err)) {
             // This is fire and forget, we don't want logging to hold up the request so don't wait for the callback
-            options.winstonInstance.log(_.merge(exceptionMeta, {
-                level,
-                message: template({ err: err, req: req, res: res }),
-            }));
+            options.winstonInstance
+                .log(_.merge(exceptionMeta, { level, message: template({ err: err, req: req, res: res }), }))
+                .catch(err => {
+                    // eslint-disable-next-line no-console
+                    console.error('Error attempting to log error message', err);
+                });
         }
 
         next(err);
@@ -304,7 +306,12 @@ exports.requestLogger = function requestLogger(options) {
         // This is fire and forget, we don't want logging to hold up the request so don't wait for the callback
         if (!options.skip(req, res)) {
             var level = _.isFunction(options.level) ? options.level(req, res) : options.level;
-            options.winstonInstance.log(_.merge(meta, { level, message: msg }));
+            options.winstonInstance
+                .log(_.merge(meta, { level, message: msg }))
+                .catch(err => {
+                    // eslint-disable-next-line no-console
+                    console.error('Error attempting to log request message', err);
+                });
         }
         next();
     };
@@ -483,7 +490,12 @@ exports.logger = function logger(options) {
             // This is fire and forget, we don't want logging to hold up the request so don't wait for the callback
             if (!options.skip(req, res)) {
                 var level = _.isFunction(options.level) ? options.level(req, res) : options.level;
-                options.winstonInstance.log(_.merge(meta, { level, message: msg }));
+                options.winstonInstance
+                    .log(_.merge(meta, { level, message: msg }))
+                    .catch(err => {
+                        // eslint-disable-next-line no-console
+                        console.error('Error attempting to log req/res message', err);
+                    });
             }
         };
 
