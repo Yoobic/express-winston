@@ -430,6 +430,147 @@ exports.logger = function logger(options) {
     };
 };
 
+//
+// ### function requestLogger(options)
+// #### @options {Object} options to initialize the middleware.
+//
+exports.requestLogger = function requestLogger(options) {
+    // The difference between this and the logger from above is that this one only log the request without caring about the response
+    ensureValidOptions(options);
+    ensureValidLoggerOptions(options);
+
+    options.requestWhitelist = options.requestWhitelist || exports.requestWhitelist;
+    options.bodyWhitelist = options.bodyWhitelist || exports.bodyWhitelist;
+    options.bodyBlacklist = options.bodyBlacklist || exports.bodyBlacklist;
+    options.headerBlacklist = options.headerBlacklist || exports.defaultHeaderBlacklist;
+    options.requestFilter = options.requestFilter || exports.defaultRequestFilter;
+    options.ignoredRoutes = options.ignoredRoutes || exports.ignoredRoutes;
+    options.winstonInstance = options.winstonInstance || (winston.createLogger({
+        transports: options.transports,
+        format: options.format
+    }));
+    options.statusLevels = options.statusLevels || false;
+    options.level = options.statusLevels ? levelFromStatus(options) : (options.level || 'info');
+    options.msg = options.msg || 'HTTP {{req.method}} {{req.url}}';
+    options.baseMeta = options.baseMeta || {};
+    options.metaField = options.metaField === null || options.metaField === 'null' ? null : options.metaField || 'meta';
+    options.colorize = options.colorize || false;
+    options.expressFormat = options.expressFormat || false;
+    options.ignoreRoute = options.ignoreRoute || function () { return false; };
+    options.skip = options.skip || exports.defaultSkip;
+    options.dynamicMeta = options.dynamicMeta || function (req, res) { return null; };
+    options.requestField = options.requestField === null || options.requestField === 'null' ? null : options.requestField || exports.requestField;
+    options.allowFilterOutWhitelistedRequestBody = !!options.allowFilterOutWhitelistedRequestBody || false;
+
+    // Using mustache style templating
+    var template = getTemplate(options, {
+        interpolate: /\{\{(.+?)\}\}/g
+    });
+
+    return function (req, res, next) {
+        var coloredRes = {};
+
+        var currentUrl = req.originalUrl || req.url;
+        if (currentUrl && _.includes(options.ignoredRoutes, currentUrl)) return next();
+        if (options.ignoreRoute(req, res)) return next();
+
+        req._routeWhitelists = {
+            req: [],
+            body: []
+        };
+
+        req._routeBlacklists = {
+            body: []
+        };
+
+        req.url = req.originalUrl || req.url;
+
+        var meta = {};
+
+        if (options.meta !== false) {
+            var logData = {};
+
+            if (options.requestField !== null) {
+                var requestWhitelist = options.requestWhitelist.concat(req._routeWhitelists.req || []);
+                var filteredRequest = filterObject(req, requestWhitelist, options.headerBlacklist, options.requestFilter);
+
+                var bodyWhitelist = _.union(options.bodyWhitelist, (req._routeWhitelists.body || []));
+                var blacklist = _.union(options.bodyBlacklist, (req._routeBlacklists.body || []));
+
+                var filteredBody = null;
+
+                if (req.body !== undefined) {
+                    if (blacklist.length > 0 && bodyWhitelist.length === 0) {
+                        var whitelist = _.difference(Object.keys(req.body), blacklist);
+                        filteredBody = filterObject(req.body, whitelist, options.headerBlacklist, options.requestFilter);
+                    } else if (
+                        requestWhitelist.indexOf('body') !== -1 &&
+                        bodyWhitelist.length === 0 &&
+                        blacklist.length === 0
+                    ) {
+                        filteredBody = filterObject(req.body, Object.keys(req.body), options.headerBlacklist, options.requestFilter);
+                    } else {
+                        filteredBody = filterObject(req.body, bodyWhitelist, options.headerBlacklist, options.requestFilter);
+                    }
+                }
+
+                if (filteredRequest && (!options.allowFilterOutWhitelistedRequestBody || filteredRequest.body !== undefined)) {
+                    if (filteredBody) {
+                        filteredRequest.body = filteredBody;
+                    } else {
+                        delete filteredRequest.body;
+                    }
+                }
+
+                logData[options.requestField] = filteredRequest;
+            }
+
+            if (options.dynamicMeta) {
+                var dynamicMeta = options.dynamicMeta(req, res);
+                logData = _.assign(logData, dynamicMeta);
+            }
+
+            meta = _.assign(meta, logData);
+        }
+
+        if (options.metaField) {
+            var fields;
+            if (Array.isArray(options.metaField)) {
+                fields = options.metaField;
+            } else {
+                fields = options.metaField.split('.');
+            }
+            _(fields).reverse().forEach(field => {
+                var newMeta = {};
+                newMeta[field] = meta;
+                meta = newMeta;
+            });
+        }
+
+        meta = _.assign(meta, options.baseMeta);
+
+        if (options.colorize) {
+            // Palette from https://github.com/expressjs/morgan/blob/master/index.js#L205
+            var statusColor = 'green';
+            if (res.statusCode >= 500) statusColor = 'red';
+            else if (res.statusCode >= 400) statusColor = 'yellow';
+            else if (res.statusCode >= 300) statusColor = 'cyan';
+
+            coloredRes.statusCode = chalk[statusColor](res.statusCode);
+        }
+
+        var msg = template({ req: req, res: _.assign({}, res, coloredRes) });
+
+        // This is fire and forget, we don't want logging to hold up the request so don't wait for the callback
+        if (!options.skip(req, res)) {
+            var level = _.isFunction(options.level) ? options.level(req, res) : options.level;
+            options.winstonInstance.log(_.merge(meta, { level, message: msg }));
+        }
+
+        next();
+    };
+};
+
 function safeJSONParse(string) {
     try {
         return JSON.parse(string);
