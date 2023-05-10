@@ -483,8 +483,6 @@ exports.requestLogger = function requestLogger(options) {
             body: []
         };
 
-        req.url = req.originalUrl || req.url;
-
         var meta = {};
 
         if (options.meta !== false) {
